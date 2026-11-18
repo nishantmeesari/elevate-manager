@@ -53,6 +53,40 @@ psql -v ON_ERROR_STOP=1 -d elevate_manager -f db\seed.sql
 The seed is not repeatable. It does not create staff users because password
 hashes require the authentication bootstrap flow.
 
+## Staging database initialization
+
+Before applying migrations, create a fresh staging database and verify that
+the migration target is isolated from production. Do not place
+`DATABASE_URL`, credentials, or secrets in repository files or shell history
+when possible.
+
+Set an environment variable locally and apply migrations explicitly:
+
+```powershell
+$env:DATABASE_URL = "<managed-postgresql-connection-url>"
+
+psql "$env:DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/001_initial.sql
+psql "$env:DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/002_passes_and_policies.sql
+psql "$env:DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/003_holds_waitlist_quiet_hours.sql
+psql "$env:DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/004_studio_payment_and_timetable.sql
+psql "$env:DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/005_quiet_hours_all_notifications.sql
+psql "$env:DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/006_application_auth_and_payments.sql
+```
+
+Record migration completion externally or in a controlled change-management
+process. There is currently no automatic migration runner.
+
+Seed only an isolated staging database when representative seed data is
+needed, and only after all six migrations have completed successfully:
+
+```powershell
+psql "$env:DATABASE_URL" -v ON_ERROR_STOP=1 -f db/seed.sql
+```
+
+Never run `db/seed.sql` automatically against staging or production, never run
+it repeatedly, and never run it against a database that already contains the
+seeded data.
+
 ## Frontend setup
 
 ```powershell
@@ -127,6 +161,8 @@ be retained or used for normal authentication.
 |---|---|
 | `DATABASE_URL` | PostgreSQL connection URL for the application database |
 | `AUTH_SECRET` | Required long random secret used to sign staff and customer access tokens |
+| `CORS_ALLOWED_ORIGINS` | Exact comma-separated frontend origins; never `*` |
+| `DATABASE_SSLMODE` | Optional PostgreSQL SSL mode; hosted hosts default to `require` |
 | `INITIAL_ADMIN_BOOTSTRAP_TOKEN` | Temporary secret used only to create the first owner |
 | `ALLOW_LOCAL_TEST_PAYMENTS` | Opt-in only; keep unset or `false` outside isolated local testing |
 
@@ -141,6 +177,101 @@ Never commit real passwords, bootstrap tokens, JWT secrets, or database
 credentials. Use `.env.example` files and process-specific environment variables
 for local configuration.
 
+## Staging architecture
+
+The staging deployment uses three separate services:
+
+```text
+Vercel frontend
+  -> https://<staging-vercel-domain>
+  -> VITE_API_URL=https://<staging-render-service>.onrender.com
+
+Render FastAPI service
+  -> 0.0.0.0:$PORT
+  -> managed PostgreSQL through DATABASE_URL
+```
+
+The frontend and backend are deployed independently. The browser sends bearer
+tokens in the `Authorization` header. The backend must allow the exact Vercel
+origin through `CORS_ALLOWED_ORIGINS`; wildcard CORS is not used.
+
+## Render backend deployment
+
+The repository includes `render.yaml` for a Python web service. Use
+`apps/api` as the service root directory if creating the service manually,
+or create the service from the blueprint.
+
+Render build command:
+
+```bash
+python -m pip install --upgrade pip
+python -m pip install -e .
+```
+
+Render start command:
+
+```bash
+python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT
+```
+
+The health check path is `/health`.
+
+## Staging verification
+
+After deployment, verify:
+
+```text
+GET https://<staging-render-service>.onrender.com/health
+GET https://<staging-render-service>.onrender.com/api/readiness
+```
+
+`/health` should return HTTP 200 without opening or querying the database.
+`/api/readiness` should return HTTP 200 only when the configured database is
+reachable and should return HTTP 503 for missing or unavailable configuration.
+
+Verify CORS from the browser or a preflight request against the exact
+`CORS_ALLOWED_ORIGINS` value. The backend rejects wildcard CORS configuration.
+
+Required Render environment variables:
+
+| Variable | Staging value |
+|---|---|
+| `DATABASE_URL` | Managed PostgreSQL connection URL |
+| `AUTH_SECRET` | Generate a new long random secret before deployment |
+| `CORS_ALLOWED_ORIGINS` | Exact comma-separated Vercel origin, for example `https://<staging-domain>.vercel.app` |
+| `DATABASE_SSLMODE` | Normally `require`; use `verify-full` only with the provider's CA chain configured |
+| `ALLOW_LOCAL_TEST_PAYMENTS` | `false` |
+| `INITIAL_ADMIN_BOOTSTRAP_TOKEN` | Set only while creating the first owner, then remove |
+
+If an owner access token or `AUTH_SECRET` was exposed previously, rotate
+`AUTH_SECRET` before staging deployment and restart the backend. Rotating the
+signing secret invalidates existing customer and staff tokens.
+
+## Vercel frontend deployment
+
+Set the Vercel project root directory to `apps/web`. The repository provides
+`apps/web/vercel.json` for `/admin` and `/admin/:path*` SPA routing.
+
+Required Vercel environment variable:
+
+| Variable | Staging value |
+|---|---|
+| `VITE_API_URL` | The public Render backend origin, with no trailing path |
+
+For example:
+
+```dotenv
+VITE_API_URL=https://<staging-render-service>.onrender.com
+```
+
+Use Vite `Preview` and `Production` environment scopes as appropriate.
+Do not put backend secrets or database credentials in `VITE_*` variables:
+all Vite variables are embedded in the browser bundle.
+
+`VITE_API_BASE_URL` is not used by the application. `VITE_API_URL` is the
+canonical frontend API variable. `VITE_DEV_API_PROXY` is local-development-only
+and defaults to `http://localhost:8000`.
+
 ## Authentication and dashboard access
 
 The staff login endpoint issues a bearer token for an active user:
@@ -152,6 +283,13 @@ The staff login endpoint issues a bearer token for an active user:
 Admin endpoints verify the bearer token and enforce role checks on the backend.
 The frontend also hides owner-only operations from receptionist accounts.
 Customer authentication uses separate customer login and token handling.
+
+Staff and customer bearer tokens are currently stored in browser local storage.
+This is compatible with the existing API contract but exposes token contents to
+browser JavaScript. Do not add secrets, database credentials, or
+`AUTH_SECRET` values to frontend code or `VITE_*` variables. A future release
+may move to secure HTTP-only cookies, but that requires a coordinated API and
+CORS/cookie-policy change and is not implemented here.
 
 The bootstrap endpoint is:
 
