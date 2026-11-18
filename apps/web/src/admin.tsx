@@ -815,7 +815,7 @@ function SettingCard({ setting, owner, onSaved }: { setting: BusinessSetting; ow
       const data = new FormData(event.currentTarget);
       const raw = String(data.get("value"));
       let value: unknown = raw;
-      try { value = JSON.parse(raw); } catch { /* Preserve plain-text setting values. */ }
+      try { value = JSON.parse(raw); } catch {}
       try { await api.admin.updateSetting(setting.key, value); onSaved(); }
       catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to update setting."); }
       finally { setBusy(false); }

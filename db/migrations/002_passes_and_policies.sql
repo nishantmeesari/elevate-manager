@@ -1,4 +1,3 @@
--- =====================================================================
 -- Elevate Manager - Migration 002: passes, policies and database-level guards
 -- Applies on top of 001_initial.sql.
 --
@@ -10,11 +9,8 @@
 --
 -- Principle: policy VALUES live in business_settings (changeable),
 -- but the rules that must never be broken are enforced by the database.
--- =====================================================================
 
--- ---------------------------------------------------------------------
 -- 1. Helpers
--- ---------------------------------------------------------------------
 
 -- Indian financial year (April-March): 2027-03-31 -> '2026-27', 2027-04-01 -> '2027-28'
 CREATE OR REPLACE FUNCTION financial_year_of(d date) RETURNS text AS $$
@@ -60,10 +56,8 @@ BEGIN
     USING ERRCODE = 'integrity_constraint_violation';
 END $$ LANGUAGE plpgsql;
 
--- ---------------------------------------------------------------------
 -- 2. Sessions must respect operating hours, holidays, trainer hours,
 --    trainer time off, active flags and the service duration
--- ---------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION validate_session_slot() RETURNS trigger AS $$
 DECLARE
   tz          text;
@@ -126,9 +120,7 @@ CREATE TRIGGER trg_session_validate_slot
   FOR EACH ROW WHEN (NEW.status = 'scheduled')
   EXECUTE FUNCTION validate_session_slot();
 
--- ---------------------------------------------------------------------
 -- 3. Session-count passes
--- ---------------------------------------------------------------------
 CREATE TABLE pass_plans (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   name          text NOT NULL UNIQUE,
@@ -160,7 +152,7 @@ CREATE TABLE member_passes (
   created_at     timestamptz NOT NULL DEFAULT now(),
   updated_at     timestamptz NOT NULL DEFAULT now(),
   CHECK (expires_at > purchased_at),
-  UNIQUE (id, customer_id)                   -- lets bookings prove "this pass belongs to this customer"
+  UNIQUE (id, customer_id)
 );
 CREATE INDEX idx_member_passes_customer ON member_passes (customer_id);
 
@@ -234,9 +226,7 @@ FROM member_passes mp
 LEFT JOIN pass_credit_ledger l ON l.member_pass_id = mp.id
 GROUP BY mp.id;
 
--- ---------------------------------------------------------------------
 -- 4. Bookings: pass link + reschedule limit
--- ---------------------------------------------------------------------
 ALTER TABLE bookings ADD COLUMN member_pass_id uuid;
 ALTER TABLE bookings ADD COLUMN reschedule_count integer NOT NULL DEFAULT 0 CHECK (reschedule_count >= 0);
 -- composite FK: the pass must belong to the same customer as the booking
@@ -278,9 +268,7 @@ END $$ LANGUAGE plpgsql;
 CREATE TRIGGER trg_booking_reschedule_limit BEFORE INSERT ON bookings
   FOR EACH ROW EXECUTE FUNCTION enforce_reschedule_limit();
 
--- ---------------------------------------------------------------------
 -- 5. Invoices can be for a booking OR a pass purchase; issued invoices are immutable
--- ---------------------------------------------------------------------
 ALTER TABLE invoices ALTER COLUMN booking_id DROP NOT NULL;
 ALTER TABLE invoices ADD COLUMN member_pass_id uuid REFERENCES member_passes(id);
 ALTER TABLE invoices ADD CONSTRAINT invoice_has_one_subject
@@ -319,9 +307,7 @@ CREATE TRIGGER trg_invoice_no_delete BEFORE DELETE ON invoices
 CREATE TRIGGER trg_invoice_items_append_only BEFORE UPDATE OR DELETE ON invoice_items
   FOR EACH ROW EXECUTE FUNCTION forbid_modification();
 
--- ---------------------------------------------------------------------
 -- 6. Payments: append-only, no overpayment, refunds cannot exceed payments
--- ---------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION enforce_payment_rules() RETURNS trigger AS $$
 DECLARE
   inv_total integer;
@@ -351,9 +337,7 @@ CREATE TRIGGER trg_payment_rules BEFORE INSERT ON payments
 CREATE TRIGGER trg_payment_append_only BEFORE UPDATE OR DELETE ON payments
   FOR EACH ROW EXECUTE FUNCTION forbid_modification();
 
--- ---------------------------------------------------------------------
 -- 7. Audit log is append-only
--- ---------------------------------------------------------------------
 CREATE TRIGGER trg_audit_append_only BEFORE UPDATE OR DELETE ON audit_logs
   FOR EACH ROW EXECUTE FUNCTION forbid_modification();
 

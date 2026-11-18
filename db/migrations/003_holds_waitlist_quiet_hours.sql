@@ -1,4 +1,3 @@
--- =====================================================================
 -- Elevate Manager - Migration 003: payment holds, waitlist, quiet hours
 -- Applies on top of 001 and 002.
 --
@@ -12,11 +11,8 @@
 --     would land in that window is sent at 20:00 the evening before instead.
 -- Policy VALUES live in business_settings (payment_hold_minutes,
 -- waitlist_offer_minutes, quiet_hours_*). The rules below are enforced by the DB.
--- =====================================================================
 
--- ---------------------------------------------------------------------
 -- 1. Waitlist table (created first: capacity logic below refers to it)
--- ---------------------------------------------------------------------
 CREATE TABLE waitlist_entries (
   id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   session_id       uuid NOT NULL REFERENCES sessions(id),
@@ -25,7 +21,7 @@ CREATE TABLE waitlist_entries (
                    CHECK (status IN ('waiting','offered','claimed','expired','withdrawn')),
   offered_at       timestamptz,
   offer_expires_at timestamptz,
-  booking_id       uuid REFERENCES bookings(id),       -- set when the offer is claimed
+  booking_id       uuid REFERENCES bookings(id),
   created_at       timestamptz NOT NULL DEFAULT now(),
   updated_at       timestamptz NOT NULL DEFAULT now(),
   CHECK (status <> 'offered' OR offer_expires_at IS NOT NULL)
@@ -37,9 +33,7 @@ CREATE INDEX idx_waitlist_queue ON waitlist_entries (session_id, created_at) WHE
 CREATE TRIGGER trg_waitlist_updated BEFORE UPDATE ON waitlist_entries
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
--- ---------------------------------------------------------------------
 -- 2. Booking statuses: pending_payment (held) and expired
--- ---------------------------------------------------------------------
 ALTER TABLE bookings DROP CONSTRAINT bookings_status_check;
 ALTER TABLE bookings ADD CONSTRAINT bookings_status_check
   CHECK (status IN ('pending_payment','confirmed','cancelled','expired','completed','no_show'));
@@ -100,10 +94,8 @@ CREATE TRIGGER trg_booking_closes_waitlist
   FOR EACH ROW WHEN (NEW.status IN ('confirmed','pending_payment'))
   EXECUTE FUNCTION close_waitlist_entry_on_booking();
 
--- ---------------------------------------------------------------------
 -- 3. Releasing unpaid holds
 --    Run every minute by the background scheduler (Phase 6).
--- ---------------------------------------------------------------------
 -- A full payment turns a held booking into a confirmed one.
 CREATE OR REPLACE FUNCTION confirm_booking_on_full_payment() RETURNS trigger AS $$
 BEGIN
@@ -165,9 +157,7 @@ WHERE b.status IN ('expired','cancelled')
 GROUP BY b.id, i.id
 HAVING COALESCE(SUM(CASE p.kind WHEN 'payment' THEN p.amount_paise ELSE -p.amount_paise END), 0) > 0;
 
--- ---------------------------------------------------------------------
 -- 4. Waitlist logic
--- ---------------------------------------------------------------------
 -- Joining is only allowed for a full session the customer has no seat in.
 CREATE OR REPLACE FUNCTION guard_waitlist_join() RETURNS trigger AS $$
 DECLARE
@@ -268,9 +258,7 @@ BEGIN
   RETURN n;
 END $$ LANGUAGE plpgsql;
 
--- ---------------------------------------------------------------------
 -- 5. Reminder quiet hours
--- ---------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION in_quiet_hours(p_ts timestamptz) RETURNS boolean AS $$
 DECLARE
   tz text; qs time; qe time; lt time;

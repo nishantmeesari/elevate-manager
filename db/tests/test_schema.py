@@ -31,7 +31,6 @@ SQL_FILES = [os.path.join("migrations", f) for f in
 SQL_FILES.append("seed.sql")
 IST = ZoneInfo("Asia/Kolkata")
 
-# SQLSTATE codes
 CHECK, FK, UNIQUE, EXCLUSION, INTEGRITY = "23514", "23503", "23505", "23P01", "23000"
 
 
@@ -110,7 +109,7 @@ def mk_session(c, trainer, service, d, hhmm):
 
 def mk_booking(c, session, customer, **kw):
     cols = {"booking_ref": "T-" + uuid.uuid4().hex[:12], "session_id": session, "customer_id": customer,
-            "price_paise": 0, "source": "admin"}   # staff-created: may be confirmed directly
+            "price_paise": 0, "source": "admin"}
     if kw.get("member_pass_id") is not None:
         cols["payment_mode"] = "pass"
     cols.update(kw)
@@ -181,11 +180,6 @@ def run_concurrently(fns):
     [t.join() for t in threads]
     return results
 
-
-# ----------------------------------------------------------------------------
-# Tests
-# ----------------------------------------------------------------------------
-
 def t_seed_matches_owner_decisions():
     with conn() as c:
         prices = dict(c.execute("select name, price_paise from services").fetchall())
@@ -206,14 +200,14 @@ def t_seed_matches_owner_decisions():
 def t_operating_hours_enforced():
     d = next_day()
     with raises(CHECK) as c:
-        mk_session(c, "Trainer A", "Personal Training", d, "05:00")       # before 6 AM
+        mk_session(c, "Trainer A", "Personal Training", d, "05:00")
     with raises(CHECK) as c:
-        mk_session(c, "Trainer A", "Personal Training", d, "20:30")       # ends 9:30 PM
+        mk_session(c, "Trainer A", "Personal Training", d, "20:30")
     with raises(CHECK) as c:
-        mk_session(c, "Trainer A", "Personal Training", d, "23:30")       # spans midnight
+        mk_session(c, "Trainer A", "Personal Training", d, "23:30")
     with conn() as c:
-        mk_session(c, "Trainer A", "Personal Training", d, "06:00")       # exactly opening: ok
-        mk_session(c, "Trainer A", "Personal Training", d, "20:00")       # ends exactly 9 PM: ok
+        mk_session(c, "Trainer A", "Personal Training", d, "06:00")
+        mk_session(c, "Trainer A", "Personal Training", d, "20:00")
 
 
 def t_holiday_blocks_sessions():
@@ -237,9 +231,9 @@ def t_session_length_must_match_service():
 def t_trainer_service_mapping():
     d = next_day()
     with raises(FK) as c:
-        mk_session(c, "Trainer A", "Yoga", d, "10:00")            # A does not teach yoga
+        mk_session(c, "Trainer A", "Yoga", d, "10:00")
     with raises(FK) as c:
-        mk_session(c, "Trainer B", "Group Fitness", d, "10:00")   # B does not teach group fitness
+        mk_session(c, "Trainer B", "Group Fitness", d, "10:00")
     with conn() as c:
         mk_session(c, "Trainer B", "Yoga", d, "10:00")
         mk_session(c, "Trainer A", "Group Fitness", d, "12:00")
@@ -252,12 +246,12 @@ def t_trainer_cannot_overlap():
         s1 = mk_session(c, "Trainer A", "Personal Training", d, "10:00")
         c.commit()
     with raises(EXCLUSION) as c:
-        mk_session(c, "Trainer A", "Group Fitness", d, "10:00")   # same time, same trainer
+        mk_session(c, "Trainer A", "Group Fitness", d, "10:00")
     with conn() as c:
-        mk_session(c, "Trainer A", "Personal Training", d, "11:00")   # back-to-back is fine
-        mk_session(c, "Trainer B", "Personal Training", d, "10:00")   # other trainer is fine
+        mk_session(c, "Trainer A", "Personal Training", d, "11:00")
+        mk_session(c, "Trainer B", "Personal Training", d, "10:00")
         c.commit()
-        # a cancelled session frees the trainer
+
         c.execute("update sessions set status='cancelled' where id=%s", (s1,))
         mk_session(c, "Trainer A", "Group Fitness", d, "10:00")
 
@@ -292,7 +286,7 @@ def t_inactive_trainer_or_service_blocked():
 def t_group_capacity_under_concurrency():
     d = next_day()
     with conn() as c:
-        s = mk_session(c, "Trainer B", "Yoga", d, "07:00")        # capacity 10
+        s = mk_session(c, "Trainer B", "Yoga", d, "07:00")
         customers = [mk_customer(c) for _ in range(14)]
         c.commit()
     res = run_concurrently([(lambda cc, cu=cu: mk_booking(cc, s, cu)) for cu in customers])
@@ -328,11 +322,11 @@ def t_cancel_frees_a_seat_and_full_class_rejects():
         bookings = [mk_booking(c, s, mk_customer(c)) for _ in range(10)]
         c.commit()
     with raises(CHECK) as c:
-        mk_booking(c, s, mk_customer(c))                           # 11th person
+        mk_booking(c, s, mk_customer(c))
     with conn() as c:
         cancel_booking(c, bookings[0])
         c.commit()
-        mk_booking(c, s, mk_customer(c))                           # now there is room
+        mk_booking(c, s, mk_customer(c))
 
 
 def t_cannot_book_cancelled_session():
@@ -380,10 +374,10 @@ def t_cancellation_window_boundary():
     start = datetime(2027, 6, 1, 10, 0, tzinfo=IST)
     with conn() as c:
         q = "select is_too_late(%s, %s, 'cancellation_window_hours')"
-        assert one(c, q, (start, start - timedelta(hours=6))) is False            # exactly 6h: still free
+        assert one(c, q, (start, start - timedelta(hours=6))) is False
         assert one(c, q, (start, start - timedelta(hours=6, minutes=1))) is False
-        assert one(c, q, (start, start - timedelta(hours=5, minutes=59))) is True  # inside window: late
-        assert one(c, q, (start, start + timedelta(minutes=5))) is True            # after start: late
+        assert one(c, q, (start, start - timedelta(hours=5, minutes=59))) is True
+        assert one(c, q, (start, start + timedelta(minutes=5))) is True
     with raises(CHECK) as c:
         c.execute("select is_too_late(now(), now(), 'no_such_setting')")
 
@@ -397,13 +391,13 @@ def t_reschedule_limit_is_one():
         s3 = mk_session(c, "Trainer A", "Personal Training", d, "11:00")
         b1 = mk_booking(c, s1, cust)
         cancel_booking(c, b1)
-        # the app tries to cheat by sending reschedule_count=0; the database overrides it
+
         b2 = mk_booking(c, s2, cust, rescheduled_from_booking_id=b1, reschedule_count=0)
         assert one(c, "select reschedule_count from bookings where id=%s", (b2,)) == 1
         cancel_booking(c, b2)
         c.commit()
     with raises(CHECK) as c:
-        mk_booking(c, s3, cust, rescheduled_from_booking_id=b2)    # second reschedule: blocked
+        mk_booking(c, s3, cust, rescheduled_from_booking_id=b2)
 
 
 def t_reschedule_must_be_same_customer():
@@ -426,14 +420,14 @@ def t_financial_year_and_gapless_numbers():
     fy = "2090-91"
     c1 = conn()
     assert c1.execute("select * from next_invoice_number(%s)", (fy,)).fetchone() == (1, f"EL/{fy}/000001")
-    c1.rollback()                                       # failed invoice creation: number must not be burned
+    c1.rollback()
     c1.close()
     with conn() as c:
         assert c.execute("select * from next_invoice_number(%s)", (fy,)).fetchone() == (1, f"EL/{fy}/000001")
         c.commit()
         assert c.execute("select * from next_invoice_number(%s)", (fy,)).fetchone() == (2, f"EL/{fy}/000002")
         c.commit()
-    # concurrent callers never get the same number
+
     res = run_concurrently([lambda cc: cc.execute("select o_seq from next_invoice_number(%s)", (fy,)).fetchone()[0]
                             for _ in range(8)])
     seqs = sorted(r[1] for r in res if r[0] == "ok")
@@ -446,13 +440,13 @@ def t_invoice_totals_must_add_up_and_one_live_invoice_per_booking():
         inv = mk_invoice(c, b)
         c.commit()
     with raises(UNIQUE) as c:
-        mk_invoice(c, b)                                # second live invoice for the same booking
+        mk_invoice(c, b)
     with raises(CHECK) as c:
         c.execute("insert into invoices (invoice_number, financial_year, seq, booking_id, customer_id, issue_date, "
                   "subtotal_paise, tax_total_paise, total_paise) "
                   "select 'X-BAD', '2026-27', 999999, id, customer_id, '2027-03-10', 100, 0, 999 "
                   "from bookings where id=%s", (b,))
-    with conn() as c:                                   # voiding allows a replacement
+    with conn() as c:
         c.execute("update invoices set status='void', void_reason='wrong amount' where id=%s", (inv,))
         mk_invoice(c, b)
 
@@ -476,13 +470,13 @@ def t_issued_invoice_is_immutable():
     with raises(INTEGRITY) as c:
         c.execute("update invoice_items set unit_price_paise=1 where invoice_id=%s", (inv,))
     with raises(CHECK) as c:
-        c.execute("update invoices set status='void' where id=%s", (inv,))       # void needs a reason
+        c.execute("update invoices set status='void' where id=%s", (inv,))
     with conn() as c:
-        c.execute("update invoices set pdf_storage_key='invoices/x.pdf' where id=%s", (inv,))   # allowed
-        c.execute("update invoices set status='void', void_reason='test' where id=%s", (inv,))  # allowed
+        c.execute("update invoices set pdf_storage_key='invoices/x.pdf' where id=%s", (inv,))
+        c.execute("update invoices set status='void', void_reason='test' where id=%s", (inv,))
         c.commit()
     with raises(INTEGRITY) as c:
-        c.execute("update invoices set void_reason='changed' where id=%s", (inv,))  # void is final
+        c.execute("update invoices set void_reason='changed' where id=%s", (inv,))
 
 
 def t_payment_status_follows_the_ledger():
@@ -512,9 +506,9 @@ def t_payments_cannot_overpay_overrefund_or_be_edited():
         pay(c, inv, 30000)
         c.commit()
     with raises(CHECK) as c:
-        pay(c, inv, 20001)                               # would exceed total
+        pay(c, inv, 20001)
     with raises(CHECK) as c:
-        pay(c, inv, 30001, kind="refund")                # more than was paid
+        pay(c, inv, 30001, kind="refund")
     with raises(INTEGRITY) as c:
         c.execute("update payments set amount_paise=1 where invoice_id=%s", (inv,))
     with raises(INTEGRITY) as c:
@@ -523,7 +517,7 @@ def t_payments_cannot_overpay_overrefund_or_be_edited():
         c.execute("update invoices set status='void', void_reason='test' where id=%s", (inv,))
         c.commit()
     with raises(CHECK) as c:
-        pay(c, inv, 100)                                 # void invoice takes no payments
+        pay(c, inv, 100)
 
 
 def t_concurrent_payments_cannot_overpay():
@@ -571,14 +565,14 @@ def t_pass_credits_never_negative_and_refund_once():
         _use(c, mp, bks[0])
         c.commit()
     with raises(UNIQUE) as c:
-        _use(c, mp, bks[0])                              # same booking cannot spend twice (1 credit still left)
+        _use(c, mp, bks[0])
     with conn() as c:
         _use(c, mp, bks[1])
         assert one(c, "select credits_remaining from pass_balances where member_pass_id=%s", (mp,)) == 0
         c.commit()
     with raises(CHECK) as c:
-        _use(c, mp, bks[2])                              # out of credits
-    with conn() as c:                                  # free cancellation gives the credit back, once
+        _use(c, mp, bks[2])
+    with conn() as c:
         c.execute("insert into pass_credit_ledger (member_pass_id, booking_id, delta, reason) "
                   "values (%s,%s,1,'cancel_refund')", (mp, bks[0]))
         assert one(c, "select credits_remaining from pass_balances where member_pass_id=%s", (mp,)) == 1
@@ -603,10 +597,10 @@ def t_pass_must_cover_service_be_unexpired_and_owned():
         b_pt = mk_booking(c, pt, cust, member_pass_id=expired)
         c.commit()
     with raises(CHECK) as c:
-        _use(c, mp, b_yoga)                              # plan does not include yoga
+        _use(c, mp, b_yoga)
     with raises(CHECK) as c:
-        _use(c, expired, b_pt)                           # pass expires before the session
-    with raises(FK) as c:                                # someone else's pass
+        _use(c, expired, b_pt)
+    with raises(FK) as c:
         other = mk_customer(c)
         s = mk_session(c, "Trainer A", "Personal Training", next_day(), "07:00")
         mk_booking(c, s, other, member_pass_id=mp)
@@ -633,7 +627,7 @@ def t_notification_dedupe_blocks_duplicate_reminders():
         c.commit()
     with raises(UNIQUE) as c:
         c.execute(q, (cust, b, key))
-    with raises(CHECK) as c:                             # provider must be explicit and known
+    with raises(CHECK) as c:
         c.execute("insert into notifications (customer_id, type, provider, scheduled_for, dedupe_key) "
                   "values (%s,'reminder','pretend','2027-03-01 12:00+05:30','k-' || gen_random_uuid())", (cust,))
 
@@ -686,9 +680,9 @@ def t_held_seats_count_toward_capacity_and_block_duplicates():
         mk_held(c, s2, cust)
         c.commit()
     with raises(CHECK) as c:
-        mk_booking(c, s, mk_customer(c))                 # 10 held seats = full class
+        mk_booking(c, s, mk_customer(c))
     with raises(UNIQUE) as c:
-        mk_booking(c, s2, cust)                          # a held seat is still that customer's seat
+        mk_booking(c, s2, cust)
 
 
 def t_hold_deadline_must_match_status():
@@ -696,13 +690,13 @@ def t_hold_deadline_must_match_status():
     with conn() as c:
         s = mk_session(c, "Trainer A", "Group Fitness", d, "07:00")
         cust = mk_customer(c)
-        b = mk_booking(c, s, cust, status="pending_payment")        # app forgot the deadline: DB sets it
+        b = mk_booking(c, s, cust, status="pending_payment")
         left = one(c, "select hold_expires_at - now() from bookings where id=%s", (b,))
         assert timedelta(minutes=14) < left <= timedelta(minutes=15), left
         c.commit()
     with raises(CHECK) as c:
         s2 = mk_session(c, "Trainer A", "Group Fitness", d, "12:00")
-        mk_booking(c, s2, cust, hold_expires_at=datetime.now(IST) + timedelta(minutes=5))   # confirmed + deadline
+        mk_booking(c, s2, cust, hold_expires_at=datetime.now(IST) + timedelta(minutes=5))
 
 
 def t_unpaid_hold_expires_and_frees_the_seat():
@@ -711,22 +705,22 @@ def t_unpaid_hold_expires_and_frees_the_seat():
         s = mk_session(c, "Trainer B", "Yoga", d, "07:00")
         for _ in range(9):
             mk_booking(c, s, mk_customer(c))
-        stale = mk_held(c, s, mk_customer(c), minutes=-1)            # deadline already passed
+        stale = mk_held(c, s, mk_customer(c), minutes=-1)
         inv = mk_invoice(c, stale, total=30000)
         other_s = mk_session(c, "Trainer B", "Yoga", d, "09:00")
-        fresh = mk_held(c, other_s, mk_customer(c), minutes=10)      # still within its 15 minutes
+        fresh = mk_held(c, other_s, mk_customer(c), minutes=10)
         c.commit()
     with raises(CHECK) as c:
-        mk_booking(c, s, mk_customer(c))                              # full while the stale hold exists
+        mk_booking(c, s, mk_customer(c))
     with conn() as c:
         assert one(c, "select expire_unpaid_holds()") == 1
         c.commit()
         assert booking_status(c, stale) == "expired"
-        assert booking_status(c, fresh) == "pending_payment"          # untouched
+        assert booking_status(c, fresh) == "pending_payment"
         assert one(c, "select status from invoices where id=%s", (inv,)) == "void"
-        mk_booking(c, s, mk_customer(c))                              # seat is back
+        mk_booking(c, s, mk_customer(c))
         c.commit()
-        assert one(c, "select expire_unpaid_holds()") == 0            # idempotent
+        assert one(c, "select expire_unpaid_holds()") == 0
 
 
 def t_full_payment_confirms_a_held_booking():
@@ -738,7 +732,7 @@ def t_full_payment_confirms_a_held_booking():
         c.commit()
         pay(c, inv, 10000)
         c.commit()
-        assert booking_status(c, b) == "pending_payment"              # part payment does not confirm
+        assert booking_status(c, b) == "pending_payment"
         pay(c, inv, 20000)
         c.commit()
         assert c.execute("select status, hold_expires_at from bookings where id=%s", (b,)).fetchone() == ("confirmed", None)
@@ -756,7 +750,7 @@ def t_partial_payment_then_expiry_is_flagged_for_a_human():
         assert one(c, "select expire_unpaid_holds()") == 1
         c.commit()
         assert booking_status(c, b) == "expired"
-        assert one(c, "select status from invoices where id=%s", (inv,)) == "issued"   # money was received: not voided
+        assert one(c, "select status from invoices where id=%s", (inv,)) == "issued"
         row = c.execute("select net_paid_paise from paid_but_inactive_bookings where booking_id=%s", (b,)).fetchone()
         assert row == (10000,), row
 
@@ -772,39 +766,39 @@ def t_waitlist_flow_with_reserved_seat_claim_and_offer_expiry():
         stranger = mk_customer(c)
         c.commit()
     entries = []
-    for cu in w:                                                       # joined in this order
+    for cu in w:
         with conn() as c:
             entries.append(join_waitlist(c, s, cu))
     with raises(CHECK) as c:
-        join_waitlist(c, s_free, stranger)                             # seats available: book instead
+        join_waitlist(c, s_free, stranger)
     with raises(CHECK) as c:
-        join_waitlist(c, s, booked[0])                                 # already has a seat
+        join_waitlist(c, s, booked[0])
     with conn() as c:
         cancel_booking(c, bks[0])
         offered = one(c, "select offer_next_waitlist_seat(%s)", (s,))
         assert offered == entries[0], "first in line gets the offer"
         status, _, off_at, off_exp = entry_state(c, offered)
         assert status == "offered" and timedelta(minutes=29, seconds=59) <= off_exp - off_at <= timedelta(minutes=30)
-        assert one(c, "select offer_next_waitlist_seat(%s)", (s,)) is None    # one free seat, one offer
+        assert one(c, "select offer_next_waitlist_seat(%s)", (s,)) is None
         c.commit()
     with raises(CHECK) as c:
-        mk_booking(c, s, stranger)                                     # the seat is reserved for the first in line
+        mk_booking(c, s, stranger)
     with raises(CHECK) as c:
-        mk_booking(c, s, w[1])                                         # ... not for the second in line either
+        mk_booking(c, s, w[1])
     with conn() as c:
-        b_w1 = mk_booking(c, s, w[0])                                  # the offered customer can take it
+        b_w1 = mk_booking(c, s, w[0])
         status, booking_id, _, _ = entry_state(c, entries[0])
         assert status == "claimed" and booking_id == b_w1
-        assert one(c, "select offer_next_waitlist_seat(%s)", (s,)) is None    # full again
+        assert one(c, "select offer_next_waitlist_seat(%s)", (s,)) is None
         cancel_booking(c, b_w1)
         assert one(c, "select offer_next_waitlist_seat(%s)", (s,)) == entries[1]
         c.commit()
         c.execute("update waitlist_entries set offer_expires_at = now() - interval '1 minute' where id=%s", (entries[1],))
         c.commit()
-        assert one(c, "select expire_waitlist_offers()") == 1          # unclaimed in 30 minutes
+        assert one(c, "select expire_waitlist_offers()") == 1
         c.commit()
         assert entry_state(c, entries[1])[0] == "expired"
-        assert entry_state(c, entries[2])[0] == "offered"              # passed to the next person
+        assert entry_state(c, entries[2])[0] == "offered"
 
 
 def t_waitlist_offer_never_outlasts_the_session():
@@ -820,7 +814,7 @@ def t_waitlist_offer_never_outlasts_the_session():
         start = one(c, "select starts_at from sessions where id=%s", (s,))
         assert one(c, "select offer_next_waitlist_seat(%s, %s)", (s, start + timedelta(minutes=1))) is None
         assert one(c, "select offer_next_waitlist_seat(%s, %s)", (s, start - timedelta(minutes=20))) == e
-        assert entry_state(c, e)[3] == start                           # 20 minutes left, not 30
+        assert entry_state(c, e)[3] == start
         c.commit()
 
 
@@ -830,13 +824,13 @@ def t_reminders_avoid_quiet_hours():
     with conn() as c:
         def rst(start, offset):
             return one(c, "select reminder_send_time(%s,%s)", (start, offset))
-        assert rst(at(d, "07:00"), 120) == at(prev, "20:00")           # would be 05:00 -> evening before
-        assert rst(at(d, "06:00"), 120) == at(prev, "20:00")           # would be 04:00 -> evening before
-        assert rst(at(d, "08:00"), 120) == at(d, "06:00")              # 06:00 is outside quiet hours
-        assert rst(at(d, "06:00"), 1440) == at(prev, "06:00")          # 24h reminder is fine as is
+        assert rst(at(d, "07:00"), 120) == at(prev, "20:00")
+        assert rst(at(d, "06:00"), 120) == at(prev, "20:00")
+        assert rst(at(d, "08:00"), 120) == at(d, "06:00")
+        assert rst(at(d, "06:00"), 1440) == at(prev, "06:00")
         assert rst(at(d, "14:00"), 1440) == at(prev, "14:00")
         assert rst(at(d, "20:00"), 120) == at(d, "18:00")
-        assert rst(at(d, "23:30"), 90) == at(d, "20:00")               # 22:00 -> same evening at 20:00
+        assert rst(at(d, "23:30"), 90) == at(d, "20:00")
 
         def quiet(hhmm):
             return one(c, "select in_quiet_hours(%s)", (at(d, hhmm),))
@@ -880,7 +874,7 @@ def t_generate_sessions_from_timetable():
     with conn() as c:
         assert c.execute("select * from generate_class_sessions('2028-01-03','2028-01-09')").fetchone() == (24, 0, 0)
         c.commit()
-        assert c.execute("select * from generate_class_sessions('2028-01-03','2028-01-09')").fetchone() == (0, 0, 0)  # repeat-safe
+        assert c.execute("select * from generate_class_sessions('2028-01-03','2028-01-09')").fetchone() == (0, 0, 0)
         rows = c.execute(
             "select to_char(starts_at at time zone 'Asia/Kolkata','HH24:MI'), s.name, t.full_name, x.capacity, "
             "       to_char(ends_at at time zone 'Asia/Kolkata','HH24:MI') "
@@ -890,7 +884,7 @@ def t_generate_sessions_from_timetable():
                         ("08:30", "Group Fitness", "Trainer A", 15, "09:30"),
                         ("18:00", "Group Fitness", "Trainer A", 15, "19:00"),
                         ("19:30", "Yoga", "Trainer B", 10, "20:30")], rows
-        assert one(c, "select count(*) from sessions where (starts_at at time zone 'Asia/Kolkata')::date = '2028-01-09'") == 0  # Sunday
+        assert one(c, "select count(*) from sessions where (starts_at at time zone 'Asia/Kolkata')::date = '2028-01-09'") == 0
 
 
 def t_generator_skips_holidays_and_trainer_leave():
@@ -900,28 +894,28 @@ def t_generator_skips_holidays_and_trainer_leave():
         c.execute("insert into trainer_time_off (trainer_id, starts_at, ends_at) values (%s,%s,%s)",
                   (tb, at(date(2028, 2, 9), "00:00"), at(date(2028, 2, 10), "00:00")))
         c.commit()
-        # Mon 7 Feb: 4 classes. Tue 8 Feb: holiday, skips 4. Wed 9 Feb: Trainer B on leave, so 2 yoga skipped, 2 group created
+
         assert c.execute("select * from generate_class_sessions('2028-02-07','2028-02-09')").fetchone() == (6, 4, 2)
 
 
 def t_studio_payment_deadline_is_two_hours_but_never_when_the_desk_is_closed():
-    d = date(2027, 6, 2)                                    # a Wednesday
+    d = date(2027, 6, 2)
     prev = d - timedelta(days=1)
     with conn() as c:
         def dl(hhmm, day=d):
             return one(c, "select studio_payment_deadline(%s)", (at(day, hhmm),))
         assert dl("18:00") == at(d, "16:00")
         assert dl("19:30") == at(d, "17:30")
-        assert dl("08:30") == at(d, "06:30")                # desk opens 06:00: fine
-        assert dl("07:00") == at(prev, "21:00")             # 05:00 would be before opening: previous evening close
+        assert dl("08:30") == at(d, "06:30")
+        assert dl("07:00") == at(prev, "21:00")
         assert dl("06:00") == at(prev, "21:00")
-        # a closed previous day pushes the deadline back to the last open day
+
         c.execute("update business_hours set is_closed=true, open_time=null, close_time=null where weekday=0")
         c.commit()
     try:
         with conn() as c:
             monday = date(2027, 6, 7)
-            assert one(c, "select studio_payment_deadline(%s)", (at(monday, "07:00"),)) == at(date(2027, 6, 5), "21:00")  # Saturday
+            assert one(c, "select studio_payment_deadline(%s)", (at(monday, "07:00"),)) == at(date(2027, 6, 5), "21:00")
     finally:
         with conn() as c:
             c.execute("update business_hours set is_closed=false, open_time='06:00', close_time='21:00' where weekday=0")
@@ -933,10 +927,10 @@ def t_studio_booking_gets_deadline_from_the_database():
     with conn() as c:
         s = mk_session(c, "Trainer B", "Yoga", d, "19:30")
         b = mk_booking(c, s, mk_customer(c), source="website", payment_mode="studio", status="pending_payment",
-                       hold_expires_at=at(d, "23:00"))       # the app tries to grant a longer hold: ignored
+                       hold_expires_at=at(d, "23:00"))
         assert one(c, "select hold_expires_at from bookings where id=%s", (b,)) == at(d, "17:30")
         c.commit()
-    # too late to choose pay-at-studio: the 2-hour mark has already passed (a class in the past)
+
     with raises(CHECK) as c:
         s = mk_session(c, "Trainer B", "Yoga", date(2020, 1, 6), "07:00")
         mk_booking(c, s, mk_customer(c), source="website", payment_mode="studio", status="pending_payment")
@@ -950,7 +944,7 @@ def t_online_hold_never_outlasts_the_session():
         start = one(c, "select starts_at from sessions where id=%s", (s,))
         assert one(c, "select hold_expires_at from bookings where id=%s", (b,)) == start
     finally:
-        c.rollback()          # leave no expired hold behind for the other tests
+        c.rollback()
         c.close()
 
 
@@ -965,7 +959,7 @@ def t_website_bookings_cannot_skip_payment():
     with raises(CHECK) as c:
         mk_booking(c, s, cust, source="website", payment_mode="studio", status="confirmed")
     with conn() as c:
-        mk_booking(c, s, cust, source="admin", payment_mode="studio", status="confirmed")   # staff walk-in at the desk
+        mk_booking(c, s, cust, source="admin", payment_mode="studio", status="confirmed")
 
 
 def t_pass_mode_and_pass_must_go_together():
@@ -977,13 +971,13 @@ def t_pass_mode_and_pass_must_go_together():
         s = mk_session(c, "Trainer B", "Yoga", d, "07:00")
         c.commit()
     with raises(CHECK) as c:
-        mk_booking(c, s, cust, payment_mode="pass")                       # pass mode without a pass
+        mk_booking(c, s, cust, payment_mode="pass")
     with raises(CHECK) as c:
-        mk_booking(c, s, cust, member_pass_id=mp, payment_mode="online")  # pass attached but not pass mode
+        mk_booking(c, s, cust, member_pass_id=mp, payment_mode="online")
     with raises(CHECK) as c:
-        mk_booking(c, s, cust, member_pass_id=mp, status="pending_payment")   # a pass booking is never "unpaid"
+        mk_booking(c, s, cust, member_pass_id=mp, status="pending_payment")
     with conn() as c:
-        mk_booking(c, s, cust, member_pass_id=mp, source="website")       # a pass booking may be confirmed instantly
+        mk_booking(c, s, cust, member_pass_id=mp, source="website")
 
 
 def t_unpaid_studio_booking_is_released_to_the_waitlist():
@@ -992,38 +986,38 @@ def t_unpaid_studio_booking_is_released_to_the_waitlist():
         s = mk_session(c, "Trainer B", "Yoga", d, "19:30")
         for _ in range(9):
             mk_booking(c, s, mk_customer(c))
-        unpaid = mk_held(c, s, mk_customer(c), mode="studio")             # 10th seat, pay-at-studio
+        unpaid = mk_held(c, s, mk_customer(c), mode="studio")
         paid_s = mk_session(c, "Trainer B", "Yoga", d, "07:00")
         paid = mk_held(c, paid_s, mk_customer(c), mode="studio")
         paid_inv = mk_invoice(c, paid, total=30000)
         unpaid_inv = mk_invoice(c, unpaid, total=30000)
         waiter = mk_customer(c)
         c.commit()
-        entry = join_waitlist(c, s, waiter)                               # class is full, so joining is allowed
+        entry = join_waitlist(c, s, waiter)
         c.execute("update bookings set hold_expires_at = now() - interval '1 minute' where id in (%s,%s)", (unpaid, paid))
         c.commit()
-        pay(c, paid_inv, 30000)                                           # paid at the desk before the deadline
+        pay(c, paid_inv, 30000)
         c.commit()
-        assert one(c, "select expire_unpaid_holds()") == 1                # only the unpaid one is released
+        assert one(c, "select expire_unpaid_holds()") == 1
         c.commit()
         assert booking_status(c, unpaid) == "expired" and booking_status(c, paid) == "confirmed"
         assert one(c, "select status from invoices where id=%s", (unpaid_inv,)) == "void"
-        assert entry_state(c, entry)[0] == "offered"                      # the waitlist gets the seat
+        assert entry_state(c, entry)[0] == "offered"
 
 
 def t_generator_never_recreates_a_cancelled_session():
-    d = date(2028, 3, 6)                                              # a Monday: 4 classes in the timetable
+    d = date(2028, 3, 6)
     with conn() as c:
         assert c.execute("select * from generate_class_sessions(%s,%s)", (d, d)).fetchone() == (4, 0, 0)
         yoga = one(c, "select id from sessions where service_id=(select id from services where name='Yoga') "
                       "and starts_at=%s", (at(d, "07:00"),))
         c.execute("update sessions set status='cancelled' where id=%s", (yoga,))
         c.commit()
-        # the nightly run must NOT put the cancelled class back
+
         assert c.execute("select * from generate_class_sessions(%s,%s)", (d, d)).fetchone() == (0, 0, 0)
         c.commit()
         assert one(c, "select count(*) from sessions where starts_at >= %s and starts_at < %s",
-                   (at(d, "00:00"), at(d + timedelta(days=1), "00:00"))) == 4          # no replacement row
+                   (at(d, "00:00"), at(d + timedelta(days=1), "00:00"))) == 4
         assert one(c, "select count(*) from sessions where starts_at=%s and service_id="
                       "(select id from services where name='Yoga')", (at(d, "07:00"),)) == 1
         assert one(c, "select status from sessions where id=%s", (yoga,)) == "cancelled"
@@ -1044,7 +1038,7 @@ def t_seed_refuses_to_run_without_all_migrations():
              (["001", "002"], "003, 004, 005"),
              (["001", "002", "003"], "004, 005"),
              (["001", "002", "003", "004"], "005"),
-             (["001", "002", "004"], "003, 005")]                     # 004 applies without 003 but would be broken
+             (["001", "002", "004"], "003, 005")]
     for applied, expected_missing in cases:
         name = "elevate_seedcheck"
         build_scratch_database(name, [SEED_FILES[n] for n in applied])
@@ -1067,7 +1061,7 @@ def t_seed_and_readme_state_the_same_prerequisites():
     migrations_dir = os.path.join(db_dir, "migrations")
     seed_sql = open(os.path.join(db_dir, "seed.sql")).read()
     readme = open(os.path.join(db_dir, "..", "README.md")).read()
-    # the migrations the seed actually checks for are the single source of truth
+
     required = re.findall(r"array_append\(missing, '(\d{3})'\)", seed_sql)
     assert required == ["001", "002", "003", "004", "005"], required
     for n in required:
@@ -1079,7 +1073,7 @@ def t_seed_and_readme_state_the_same_prerequisites():
     assert "**once**" in readme and "in order" in readme, "README must say: in order, run seed once"
     for text, where in ((header, "seed.sql"), (readme, "README")):
         assert "after 001 and 002" not in text.lower(), f"stale prerequisite wording left in {where}"
-    # the old narrow quiet-hours wording must not survive in the docs
+
     assert "only reminders are restricted" not in readme.lower(), "README still says only reminders are restricted"
 
 
@@ -1101,7 +1095,7 @@ def full_yoga_class(c, d, hhmm, waiting=3):
     entries = []
     for w in ws:
         entries.append(join_waitlist(c, s, w))
-        c.commit()                                    # separate transactions: queue order is unambiguous
+        c.commit()
     return s, bks, ws, entries
 
 
@@ -1112,18 +1106,18 @@ def t_next_allowed_send_time():
         def nat(day, hhmm):
             return one(c, "select next_allowed_send_time(%s)", (at(day, hhmm),))
         for hhmm in ("06:00", "12:00", "20:59"):
-            assert nat(d, hhmm) == at(d, hhmm), hhmm                  # allowed times are untouched (06:00 is allowed)
+            assert nat(d, hhmm) == at(d, hhmm), hhmm
         for hhmm in ("21:00", "23:59"):
-            assert nat(d, hhmm) == at(nxt, "06:00"), hhmm             # evening -> tomorrow 06:00
+            assert nat(d, hhmm) == at(nxt, "06:00"), hhmm
         for hhmm in ("00:00", "03:00", "05:59"):
-            assert nat(d, hhmm) == at(d, "06:00"), hhmm               # small hours -> this morning 06:00
+            assert nat(d, hhmm) == at(d, "06:00"), hhmm
 
 
 def t_every_automated_notification_type_respects_quiet_hours():
     d = next_day()
     with conn() as c:
         for t in NOTIFICATION_TYPES:
-            mk_notification(c, t, at(d, "06:00"))                     # edges of the allowed window are fine
+            mk_notification(c, t, at(d, "06:00"))
             mk_notification(c, t, at(d, "20:59"))
         n = mk_notification(c, "invoice", at(d, "12:00"))
         c.commit()
@@ -1131,9 +1125,9 @@ def t_every_automated_notification_type_respects_quiet_hours():
         for hhmm in ("21:00", "23:30", "00:00", "03:00", "05:59"):
             with raises(CHECK) as c:
                 mk_notification(c, t, at(d, hhmm))
-    with raises(CHECK) as c:                                          # moving an existing one into quiet hours
+    with raises(CHECK) as c:
         c.execute("update notifications set scheduled_for=%s where id=%s", (at(d, "22:00"), n))
-    with raises(CHECK) as c:                                          # a retry at night
+    with raises(CHECK) as c:
         c.execute("update notifications set status='failed', next_retry_at=%s where id=%s", (at(d, "02:00"), n))
     with conn() as c:
         c.execute("update notifications set status='failed', next_retry_at=%s where id=%s", (at(d, "13:00"), n))
@@ -1143,11 +1137,11 @@ def t_sender_gate_never_hands_out_notifications_in_quiet_hours():
     d = next_day()
     nxt = d + timedelta(days=1)
     with conn() as c:
-        late = mk_notification(c, "invoice", at(d, "20:30"))          # due 20:30, but the worker was down
+        late = mk_notification(c, "invoice", at(d, "20:30"))
         retry = mk_notification(c, "invoice", at(d, "12:00"))
         c.execute("update notifications set status='failed', next_retry_at=%s where id=%s", (at(nxt, "10:00"), retry))
         no_retry = mk_notification(c, "invoice", at(d, "12:30"))
-        c.execute("update notifications set status='failed' where id=%s", (no_retry,))   # failed, no retry planned
+        c.execute("update notifications set status='failed' where id=%s", (no_retry,))
         c.commit()
 
         def claim(ts):
@@ -1155,15 +1149,15 @@ def t_sender_gate_never_hands_out_notifications_in_quiet_hours():
             c.commit()
             return ids
 
-        assert claim(at(d, "21:10")) == set()                         # quiet hours: nothing is handed out at all
+        assert claim(at(d, "21:10")) == set()
         assert one(c, "select status from notifications where id=%s", (late,)) == "scheduled"
-        got = claim(at(nxt, "06:00"))                                 # quiet hours over: the late one goes out
+        got = claim(at(nxt, "06:00"))
         assert late in got and retry not in got and no_retry not in got
         assert c.execute("select status, attempts from notifications where id=%s", (late,)).fetchone() == ("queued", 1)
-        assert late not in claim(at(nxt, "06:01"))                    # never handed out twice
-        assert retry in claim(at(nxt, "10:00"))                       # the retry waits for its own time
+        assert late not in claim(at(nxt, "06:01"))
+        assert retry in claim(at(nxt, "10:00"))
         assert c.execute("select status, attempts from notifications where id=%s", (retry,)).fetchone() == ("queued", 1)
-        assert no_retry not in claim(at(nxt, "12:00"))                # no retry time set: not retried automatically
+        assert no_retry not in claim(at(nxt, "12:00"))
 
 
 def t_overnight_seat_is_reserved_and_claim_clock_starts_at_0600():
@@ -1173,24 +1167,24 @@ def t_overnight_seat_is_reserved_and_claim_clock_starts_at_0600():
         stranger = mk_customer(c)
         cancel_booking(c, bks[0])
         c.commit()
-        freed = at(d - timedelta(days=1), "21:00")                    # e.g. the pay-at-studio release for a 7 AM class
+        freed = at(d - timedelta(days=1), "21:00")
         assert one(c, "select offer_next_waitlist_seat(%s,%s)", (s, freed)) == es[0]
         c.commit()
         st, _, off_at, off_exp = entry_state(c, es[0])
-        assert (st, off_at, off_exp) == ("offered", at(d, "06:00"), at(d, "06:30"))    # clock starts at 06:00
-        assert one(c, "select offer_next_waitlist_seat(%s,%s)", (s, freed)) is None    # already reserved: one seat, one offer
+        assert (st, off_at, off_exp) == ("offered", at(d, "06:00"), at(d, "06:30"))
+        assert one(c, "select offer_next_waitlist_seat(%s,%s)", (s, freed)) is None
     with raises(CHECK) as c:
-        mk_booking(c, s, stranger)                                    # the public cannot take it overnight
+        mk_booking(c, s, stranger)
     with conn() as c:
-        assert one(c, "select expire_waitlist_offers(%s)", (at(d, "06:30"),)) >= 1     # first person did not claim
+        assert one(c, "select expire_waitlist_offers(%s)", (at(d, "06:30"),)) >= 1
         c.commit()
         assert entry_state(c, es[0])[0] == "expired"
         st, _, off_at, off_exp = entry_state(c, es[1])
-        assert (st, off_at, off_exp) == ("offered", at(d, "06:30"), at(d, "07:00"))    # 30 minutes, ends at class start
+        assert (st, off_at, off_exp) == ("offered", at(d, "06:30"), at(d, "07:00"))
         one(c, "select expire_waitlist_offers(%s)", (at(d, "07:00"),))
         c.commit()
         assert entry_state(c, es[1])[0] == "expired"
-        assert entry_state(c, es[2])[0] == "waiting"                  # the class has started: no more offers
+        assert entry_state(c, es[2])[0] == "waiting"
 
 
 def t_early_class_waitlist_gets_exactly_the_chances_that_fit():
@@ -1209,7 +1203,7 @@ def t_early_class_waitlist_gets_exactly_the_chances_that_fit():
             if t != "08:30":
                 st, _, off_at, off_exp = entry_state(c, es[i])
                 assert (st, off_at, off_exp - off_at) == ("offered", at(d, t), timedelta(minutes=30)), (i, t)
-        assert entry_state(c, es[5])[0] == "waiting"                  # five people got a chance, the sixth did not
+        assert entry_state(c, es[5])[0] == "waiting"
 
 
 def t_waitlist_is_bypassed_when_less_than_15_minutes_remain():
@@ -1223,14 +1217,14 @@ def t_waitlist_is_bypassed_when_less_than_15_minutes_remain():
         for b in (b1[0], b2[0], b3[0]):
             cancel_booking(c, b)
         c.commit()
-        # 10 minutes before a 07:00 class: no offer, the seat is open to the public
+
         assert one(c, "select offer_next_waitlist_seat(%s,%s)", (s1, at(d, "06:50"))) is None
         assert entry_state(c, e1[0])[0] == "waiting"
         mk_booking(c, s1, strangers[0])
-        # exactly 15 minutes before a 09:00 class: still offered
+
         assert one(c, "select offer_next_waitlist_seat(%s,%s)", (s2, at(d, "08:45"))) == e2[0]
         assert entry_state(c, e2[0])[3] == at(d, "09:00")
-        # freed at 05:55 for a 06:10 class: the window would open at 06:00 with 10 minutes left -> bypass
+
         assert one(c, "select offer_next_waitlist_seat(%s,%s)", (s3, at(d2, "05:55"))) is None
         assert entry_state(c, e3[0])[0] == "waiting"
         mk_booking(c, s3, strangers[1])
@@ -1244,22 +1238,22 @@ def t_accepted_waitlist_claim_gets_the_standard_15_minute_hold():
         stranger = mk_customer(c)
         cancel_booking(c, bks[0])
         c.commit()
-        assert one(c, "select offer_next_waitlist_seat(%s)", (s,)) == es[0]      # real clock: valid at any hour
+        assert one(c, "select offer_next_waitlist_seat(%s)", (s,)) == es[0]
         c.commit()
     with raises(CHECK) as c:
-        mk_booking(c, s, stranger, source="website", status="pending_payment")   # cannot jump the queue
+        mk_booking(c, s, stranger, source="website", status="pending_payment")
     with conn() as c:
-        b = mk_booking(c, s, ws[0], source="website", status="pending_payment")  # the offered person claims
+        b = mk_booking(c, s, ws[0], source="website", status="pending_payment")
         st, booking_id, _, _ = entry_state(c, es[0])
         assert (st, booking_id) == ("claimed", b)
         left = one(c, "select hold_expires_at - now() from bookings where id=%s", (b,))
-        assert timedelta(minutes=14) < left <= timedelta(minutes=15), left          # the standard payment hold
+        assert timedelta(minutes=14) < left <= timedelta(minutes=15), left
         c.execute("update bookings set hold_expires_at = now() - interval '1 minute' where id=%s", (b,))
         c.commit()
-        assert one(c, "select expire_unpaid_holds()") == 1                          # not paid in time
+        assert one(c, "select expire_unpaid_holds()") == 1
         c.commit()
         assert booking_status(c, b) == "expired"
-        assert entry_state(c, es[1])[0] == "offered"                                # the next person in line
+        assert entry_state(c, es[1])[0] == "offered"
 
 
 def t_pay_at_studio_release_for_7am_class_is_offered_at_0600():
@@ -1274,14 +1268,14 @@ def t_pay_at_studio_release_for_7am_class_is_offered_at_0600():
         e = join_waitlist(c, s, waiter)
         c.commit()
         deadline = one(c, "select studio_payment_deadline(%s)", (at(d, "07:00"),))
-        assert deadline == at(d - timedelta(days=1), "21:00")                       # desk closes 21:00 the evening before
+        assert deadline == at(d - timedelta(days=1), "21:00")
         c.execute("update bookings set hold_expires_at=%s where id=%s", (deadline, held))
         c.commit()
         assert one(c, "select expire_unpaid_holds(%s)", (deadline,)) >= 1
         c.commit()
         assert booking_status(c, held) == "expired"
         st, _, off_at, off_exp = entry_state(c, e)
-        assert (st, off_at, off_exp) == ("offered", at(d, "06:00"), at(d, "06:30"))  # not messaged at 21:00
+        assert (st, off_at, off_exp) == ("offered", at(d, "06:00"), at(d, "06:30"))
 
 
 def t_audit_log_is_append_only():
@@ -1293,11 +1287,6 @@ def t_audit_log_is_append_only():
         c.execute("update audit_logs set action='tampered'")
     with raises(INTEGRITY) as c:
         c.execute("delete from audit_logs")
-
-
-# ----------------------------------------------------------------------------
-# Runner
-# ----------------------------------------------------------------------------
 
 def setup_database():
     with conn("postgres", autocommit=True) as c:
@@ -1316,7 +1305,7 @@ def main():
     setup_database()
     tests = [(n, f) for n, f in sorted(globals().items()) if n.startswith("t_") and callable(f)]
     if os.environ.get("REVERSE"):
-        tests.reverse()          # REVERSE=1 runs the tests backwards to expose hidden dependencies between them
+        tests.reverse()
     passed, failed = 0, []
     print(f"\nRunning {len(tests)} tests\n")
     for name, fn in tests:

@@ -1,4 +1,3 @@
--- =====================================================================
 -- Elevate Manager - seed data for the Elevate Studio simulation
 --
 -- HOW TO RUN
@@ -25,7 +24,6 @@
 -- Not seeded on purpose: users (need real password hashes, comes with auth),
 -- holidays (list not provided). Class sessions are NOT seeded either: they are
 -- generated from class_timetable by generate_class_sessions(from, to).
--- =====================================================================
 
 -- Prerequisite check: one object from each migration ---------------------
 DO $$
@@ -52,17 +50,17 @@ END $$;
 
 -- Business settings ---------------------------------------------------
 INSERT INTO business_settings (key, value) VALUES
-  ('business_name',              '"Elevate Studio"'),                 -- [DECIDED] from brief
-  ('business_city',               '"Pune, Maharashtra, India"'),       -- [DECIDED] from brief
-  ('timezone',                    '"Asia/Kolkata"'),                   -- [DECIDED] Pune
-  ('cancellation_window_hours',   '6'),                                -- [DECIDED] free cancel up to 6h before
-  ('reschedule_window_hours',     '6'),                                -- [DECIDED] same as cancellation
-  ('max_reschedules_per_booking', '1'),                                -- [DECIDED]
-  ('reminder_offsets_minutes',    '[1440, 120]'),                      -- [DECIDED] from brief (24h, 2h)
-  ('tax_enabled',                 'false'),                            -- [DECIDED] no invented tax rates
-  ('slot_interval_minutes',       '60'),                               -- [ASSUMED]
-  ('min_booking_lead_minutes',    '60'),                               -- [ASSUMED]
-  ('max_advance_booking_days',    '30');                               -- [ASSUMED]
+  ('business_name',              '"Elevate Studio"'),
+  ('business_city',               '"Pune, Maharashtra, India"'),
+  ('timezone',                    '"Asia/Kolkata"'),
+  ('cancellation_window_hours',   '6'),
+  ('reschedule_window_hours',     '6'),
+  ('max_reschedules_per_booking', '1'),
+  ('reminder_offsets_minutes',    '[1440, 120]'),
+  ('tax_enabled',                 'false'),
+  ('slot_interval_minutes',       '60'),
+  ('min_booking_lead_minutes',    '60'),
+  ('max_advance_booking_days',    '30');
 
 -- Operating hours: 06:00-21:00 [DECIDED]; open all 7 days [ASSUMED] ----
 INSERT INTO business_hours (weekday, is_closed, open_time, close_time)
@@ -70,9 +68,9 @@ SELECT d, false, '06:00', '21:00' FROM generate_series(0, 6) AS d;
 
 -- Services [DECIDED prices/capacities; ASSUMED 60-minute duration] ------
 INSERT INTO services (name, duration_minutes, default_capacity, price_paise) VALUES
-  ('Personal Training', 60,  1, 50000),   -- Rs 500
-  ('Yoga',              60, 10, 30000),   -- Rs 300, max 10
-  ('Group Fitness',     60, 15, 20000);   -- Rs 200, max 15
+  ('Personal Training', 60,  1, 50000),
+  ('Yoga',              60, 10, 30000),
+  ('Group Fitness',     60, 15, 20000);
 
 -- Trainers [DECIDED mapping] -------------------------------------------
 INSERT INTO trainers (full_name) VALUES ('Trainer A'), ('Trainer B');
@@ -92,11 +90,11 @@ SELECT t.id, d, '06:00', '21:00' FROM trainers t, generate_series(0, 6) AS d;
 
 -- Policies decided after migration 003 ----------------------------------
 INSERT INTO business_settings (key, value) VALUES
-  ('payment_hold_minutes',    '15'),        -- [DECIDED] unpaid online booking is released after 15 min
-  ('waitlist_offer_minutes',  '30'),        -- [DECIDED] waitlisted customer has 30 min to claim a freed seat
-  ('quiet_hours_start',       '"21:00"'),   -- [DECIDED] no reminders from 9 PM ...
-  ('quiet_hours_end',         '"06:00"'),   -- [DECIDED] ... until 6 AM
-  ('quiet_hours_send_time',   '"20:00"');   -- [DECIDED] a reminder that would land in quiet hours goes out at 8 PM the evening before
+  ('payment_hold_minutes',    '15'),
+  ('waitlist_offer_minutes',  '30'),
+  ('quiet_hours_start',       '"21:00"'),
+  ('quiet_hours_end',         '"06:00"'),
+  ('quiet_hours_send_time',   '"20:00"');
 
 -- 10-session pass [DECIDED: Rs 2,500, 30 days, Group Fitness + Yoga only]
 -- Rs 250 per session. Note: still above the Rs 200 Group Fitness drop-in price (Yoga drop-in is Rs 300).
@@ -115,10 +113,10 @@ INSERT INTO business_settings (key, value) VALUES ('studio_payment_deadline_hour
 -- Capacities come from the service defaults (Yoga 10, Group Fitness 15), as decided.
 INSERT INTO class_timetable (service_id, trainer_id, weekday, start_time, capacity)
 SELECT s.id, t.id, d, c.start_time::time, c.capacity
-FROM (VALUES ('Yoga',          'Trainer B', '07:00', 10),   -- Morning Yoga
-             ('Group Fitness', 'Trainer A', '08:30', 15),   -- Morning Group Fitness
-             ('Group Fitness', 'Trainer A', '18:00', 15),   -- Evening Group Fitness
-             ('Yoga',          'Trainer B', '19:30', 10)    -- Evening Yoga
+FROM (VALUES ('Yoga',          'Trainer B', '07:00', 10),
+             ('Group Fitness', 'Trainer A', '08:30', 15),
+             ('Group Fitness', 'Trainer A', '18:00', 15),
+             ('Yoga',          'Trainer B', '19:30', 10)
      ) AS c(service, trainer, start_time, capacity)
 JOIN services s ON s.name = c.service
 JOIN trainers t ON t.full_name = c.trainer

@@ -1,4 +1,3 @@
--- =====================================================================
 -- Elevate Manager - Migration 004: pay-at-studio rule and class timetable
 -- Applies on top of 001-003.
 --
@@ -12,24 +11,19 @@
 --
 -- The database computes the payment deadline itself, so the application cannot
 -- accidentally give a booking a longer hold than the policy allows.
--- =====================================================================
 
--- ---------------------------------------------------------------------
 -- 1. How a booking is being paid
--- ---------------------------------------------------------------------
 ALTER TABLE bookings ADD COLUMN payment_mode text NOT NULL DEFAULT 'online'
   CHECK (payment_mode IN ('online','studio','pass'));
 -- a pass booking has a pass, and only a pass booking has one
 ALTER TABLE bookings ADD CONSTRAINT booking_pass_mode_consistency
   CHECK ((payment_mode = 'pass') = (member_pass_id IS NOT NULL));
 
--- ---------------------------------------------------------------------
 -- 2. Pay-at-studio deadline
 --    Normally class start minus studio_payment_deadline_hours (2).
 --    If the front desk is closed at that moment (for example the deadline for a
 --    7:00 AM class would be 5:00 AM, before the studio opens), the deadline moves
 --    to the closing time of the last open day before it.
--- ---------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION studio_payment_deadline(p_starts_at timestamptz) RETURNS timestamptz AS $$
 DECLARE
   tz    text;
@@ -70,9 +64,7 @@ BEGIN
   RAISE EXCEPTION 'no open day found before the session' USING ERRCODE = '23514';
 END $$ LANGUAGE plpgsql STABLE;
 
--- ---------------------------------------------------------------------
 -- 3. The database sets the payment deadline and refuses unpaid shortcuts
--- ---------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION set_booking_payment_rules() RETURNS trigger AS $$
 DECLARE
   s_start  timestamptz;
@@ -113,16 +105,14 @@ END $$ LANGUAGE plpgsql;
 CREATE TRIGGER trg_booking_payment_rules BEFORE INSERT ON bookings
   FOR EACH ROW EXECUTE FUNCTION set_booking_payment_rules();
 
--- ---------------------------------------------------------------------
 -- 4. Weekly class timetable and session generator
--- ---------------------------------------------------------------------
 CREATE TABLE class_timetable (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   service_id  uuid NOT NULL REFERENCES services(id),
   trainer_id  uuid NOT NULL REFERENCES trainers(id),
-  weekday     smallint NOT NULL CHECK (weekday BETWEEN 0 AND 6),   -- 0 = Sunday ... 6 = Saturday
-  start_time  time NOT NULL,                                        -- local studio time
-  capacity    integer CHECK (capacity > 0),                         -- NULL = service default
+  weekday     smallint NOT NULL CHECK (weekday BETWEEN 0 AND 6),
+  start_time  time NOT NULL,
+  capacity    integer CHECK (capacity > 0),
   is_active   boolean NOT NULL DEFAULT true,
   created_at  timestamptz NOT NULL DEFAULT now(),
   updated_at  timestamptz NOT NULL DEFAULT now(),

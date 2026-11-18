@@ -1,4 +1,3 @@
--- =====================================================================
 -- Elevate Manager - Migration 005: quiet hours for ALL automated notifications
 -- Applies on top of 001-004 (which are left untouched).
 --
@@ -19,15 +18,12 @@
 -- Policy VALUES live in business_settings (quiet_hours_start / quiet_hours_end,
 -- waitlist_offer_minutes, waitlist_min_claim_minutes). Quiet hours are assumed to
 -- run overnight (start later in the day than end), as in migration 003.
--- =====================================================================
 
--- ---------------------------------------------------------------------
 -- 1. The earliest moment a message may go out
 --    Not in quiet hours -> the moment itself. In quiet hours -> the next 06:00 local.
 --    Application code uses this to set notifications.scheduled_for / next_retry_at.
 --    (Reminders keep using reminder_send_time(), which moves EARLIER, to 20:00 the evening
 --    before, because a reminder sent after the class makes no sense.)
--- ---------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION next_allowed_send_time(p_ts timestamptz) RETURNS timestamptz AS $$
 DECLARE
   tz text;
@@ -50,10 +46,8 @@ BEGIN
   RETURN (d + qe) AT TIME ZONE tz;
 END $$ LANGUAGE plpgsql STABLE;
 
--- ---------------------------------------------------------------------
 -- 2. Every automated notification type, including retries
 --    Replaces the reminder-only trigger from migration 003.
--- ---------------------------------------------------------------------
 DROP TRIGGER trg_reminder_quiet_hours ON notifications;
 DROP FUNCTION guard_reminder_quiet_hours();
 
@@ -74,7 +68,6 @@ CREATE TRIGGER trg_notification_quiet_hours
   BEFORE INSERT OR UPDATE OF scheduled_for, next_retry_at ON notifications
   FOR EACH ROW EXECUTE FUNCTION guard_notification_quiet_hours();
 
--- ---------------------------------------------------------------------
 -- 3. Sender gate
 --    The message sender must take its work from this function, never straight from the
 --    table. It hands out nothing during quiet hours, so a late worker (down at 20:58,
@@ -82,7 +75,6 @@ CREATE TRIGGER trg_notification_quiet_hours
 --    Returns the claimed rows, now marked 'queued' with attempts + 1.
 --    A scheduled row is claimed when its time has come. A failed row is claimed again
 --    only when the sender has set a next_retry_at that has come (no endless retry loop).
--- ---------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION claim_due_notifications(p_limit integer DEFAULT 50, p_now timestamptz DEFAULT now())
 RETURNS SETOF notifications AS $$
 BEGIN
@@ -101,7 +93,6 @@ BEGIN
   RETURNING n.*;
 END $$ LANGUAGE plpgsql;
 
--- ---------------------------------------------------------------------
 -- 4. Waitlist offers: overnight reservation, 06:00 clock start, 15-minute minimum
 --    Replaces offer_next_waitlist_seat() from migration 003 (same signature, so
 --    expire_waitlist_offers() and expire_unpaid_holds() pick it up automatically).
@@ -116,7 +107,6 @@ END $$ LANGUAGE plpgsql;
 --    If less than waitlist_min_claim_minutes would remain before the class starts, no offer
 --    is made: the entry stays 'waiting', the function returns NULL, and the seat is open
 --    to the public.
--- ---------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION offer_next_waitlist_seat(p_session_id uuid, p_now timestamptz DEFAULT now())
 RETURNS uuid AS $$
 DECLARE
@@ -153,10 +143,10 @@ BEGIN
     RAISE EXCEPTION 'business setting waitlist_min_claim_minutes is not configured' USING ERRCODE = '23514';
   END IF;
 
-  w_open  := next_allowed_send_time(p_now);                      -- 06:00 if the seat freed in quiet hours
+  w_open  := next_allowed_send_time(p_now);
   w_close := LEAST(w_open + make_interval(mins => win), s_start);
   IF w_close - w_open < make_interval(mins => min_claim) THEN
-    RETURN NULL;                                                 -- too close to class: open to the public
+    RETURN NULL;
   END IF;
 
   SELECT id INTO eid FROM waitlist_entries
